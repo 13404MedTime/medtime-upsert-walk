@@ -170,3 +170,119 @@ type Date struct {
 	Gte string `json:"$gte"`
 	Lt  string `json:"$lt"`
 }
+
+func (f FunctionAssert) GetAsserts() []Asserts {
+	var appId = os.Getenv("APP_ID")
+
+	return []Asserts{
+		{
+			Request: NewRequestBody{
+				Data: Data{
+					AppId:     appId,
+					ObjectIds: []string{"96b6c9e0-ec0c-4297-8098-fa9341c40820"},
+				},
+			},
+			Response: Response{
+				Status: "done",
+			},
+		},
+		{
+			Request: NewRequestBody{
+				Data: Data{
+					AppId:     appId,
+					ObjectIds: []string{"96b6c9e0-ec0c-4297-8098"},
+				},
+			},
+			Response: Response{Status: "error"},
+		},
+	}
+}
+
+func (f FunctionAssert) GetBenchmarkRequest() Asserts {
+	var appId = os.Getenv("APP_ID")
+	return Asserts{
+		Request: NewRequestBody{
+			Data: Data{
+				AppId:     appId,
+				ObjectIds: []string{"96b6c9e0-ec0c-4297-8098-fa9341c40820"},
+			},
+		},
+		Response: Response{
+			Status: "done",
+		},
+	}
+}
+
+// Handle a serverless request
+func Handle(req []byte) string {
+
+	var (
+		response Response
+		request  NewRequestBody
+	)
+
+	defer func() {
+		responseByte, _ := json.Marshal(response)
+		Send(string(responseByte))
+	}()
+
+	err := json.Unmarshal(req, &request)
+	if err != nil {
+		response.Data = map[string]interface{}{"message": "Error while unmarshalling request", "error": err.Error()}
+		response.Status = "error"
+		responseByte, _ := json.Marshal(response)
+		return string(responseByte)
+	}
+	Send(fmt.Sprintf("request coming %v", req))
+
+	currentTime := time.Now()
+
+	layout := "02.01.2006 15:04"
+
+	gte := currentTime
+
+	createtObjectRequest := DateFilter{
+		Gte:      strings.Split(gte.Format(layout), " ")[0] + `\t00:00`,
+		ClientId: request.Data.ObjectData["cleints_id"].(string),
+	}
+
+	res, response, err := GetListSlimObject(SlimFunctionRequest{
+		BaseUrl:   baseUrl,
+		TableSlug: "walk",
+		AppId:     request.Data.AppId,
+		DateFilter: createtObjectRequest,
+		DisableFaas: true,
+	})
+
+	if err != nil {
+		response.Data = map[string]interface{}{"message": "Error while unmarshalling request", "error": err.Error()}
+		response.Status = "error"
+		responseByte, _ := json.Marshal(response)
+		return string(responseByte)
+	}
+
+	ids := []string{}
+	for _, v := range res.Data.Data.Response {
+		ids = append(ids, v.GUID)
+	}
+
+	if len(ids) != 0 {
+		_, err = MultipleDelete(FunctionRequest{
+			BaseUrl:     baseUrl,
+			TableSlug:   "walk",
+			AppId:       request.Data.AppId,
+			Request:     Request{Data: map[string]interface{}{"ids": ids}},
+			DisableFaas: true,
+		})
+		if err != nil {
+			response.Data = map[string]interface{}{"message": "Error while deleting clients previous walks", "error": err.Error()}
+			response.Status = "error"
+			responseByte, _ := json.Marshal(response)
+			return string(responseByte)
+		}
+	}
+
+	responseByte, _ := json.Marshal(res)
+
+	return string(responseByte)
+}
